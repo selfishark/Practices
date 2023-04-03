@@ -238,3 +238,10 @@ SELECT StockSKU, StockSize, StockPrice FROM Orders.Stock
 
 
 -- FILTERED INDEX
+DROP INDEX IF EXISTS idx_Stock_StockSize ON Orders.Stock
+CREATE INDEX idx_Stock_StockSize
+	ON Orders.Stock(StockSize)
+	WHERE StockSize = 6
+
+SELECT StockSize, StockName from Orders.Stock 
+	WHERE StockSize = 6			-- Can only be used with Hard Coded value Queries and not parametised queries
