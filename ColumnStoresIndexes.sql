@@ -112,6 +112,32 @@ GO
 
 
 -- This sys commands give the number of row group
-SELECT * FROM sys.column_store_row_groups
+SELECT * FROM sys.column_store_row_groups		-- Workd once index defined
 
 GO
+
+-- to create a seek on a columnstore you can combine a clustered rowstore index with a nonclutered columnstore index
+
+ALTER TABLE Orders.Stock4
+ADD CONSTRAINT	UQ_Orders_OrdersStock4_StockID	
+	UNIQUE (StockID) -- Create a UNIQUE Key before creating the clustered index 
+
+GO
+
+DROP INDEX IF EXISTS idx_Orders_OrderStock4_StockID ON Orders.Stock4
+CREATE CLUSTERED INDEX idx_Orders_OrderStock4_Rowstore 
+	ON Orders.Stock4(StockID);
+
+
+
+GO
+
+DROP INDEX IF EXISTS nc_idx_Orders_OrderStock4_Columnstore ON Orders.Stock4
+CREATE NONCLUSTERED COLUMNSTORE INDEX nc_idx_Orders_OrderStock4_Columnstore ON Orders.Stock4(StockID, StockName, StockSKU, StockPrice, StockSize);
+
+GO
+
+-- Now Query the table with predicates to evaluate the seek performance
+
+SELECT * FROM Orders.Stock4
+WHERE StockID=6
