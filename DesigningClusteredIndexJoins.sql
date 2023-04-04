@@ -70,7 +70,7 @@ SELECT * FROM Orders.Stock3;
 
 GO
 
--- create back table
+-- create backup table
 SELECT * 
 INTO Stock
 FROM Orders.Stock1
@@ -197,27 +197,8 @@ SELECT Itm.OrderItemID, Stk.StockName		-- seek predicate on JOIN_ed Tables
 
 
 
--- INDEX ON JOINED TABLE 
--- join table OrderItem and Stock
+-- INDEXES
 
-/*
-CREATE OR ALTER VIEW Orders.Stock_Items_Stats
-AS
-SELECT
-	Stock.StockName			AS Name,
-	Stock.StockSKU			AS SKU,
-	Stock.StockSize			AS Size,
-	Stock.StockPrice		AS Price,
-	Item.Quantity			AS Quantity,
-	Item.Discount			AS Discount_On
-FROM Orders.Stock as Stock
-JOIN Orders.OrderItems AS Item
-	ON Stock.StockID = Item.StockID
-GO
-
-SELECT * FROM Orders.Stock_Items_Stats
-GO
-*/
 
 
 ALTER TABLE Orders.OrderItems
@@ -245,3 +226,39 @@ CREATE INDEX idx_Stock_StockSize
 
 SELECT StockSize, StockName from Orders.Stock 
 	WHERE StockSize = 6			-- Can only be used with Hard Coded value Queries and not parametised queries
+GO
+
+
+-- INDEX ON JOINED TABLE 
+-- join table OrderItem and Stock
+
+
+CREATE OR ALTER VIEW Orders.Stock_Items_Stats
+WITH SCHEMABINDING
+AS
+
+SELECT
+	Stock.StockID			AS Stock_ID,
+	Stock.StockName			AS Name,
+	Stock.StockSKU			AS SKU,
+	Stock.StockSize			AS Size,
+	Stock.StockPrice		AS Price,
+	Item.Quantity			AS Quantity,
+	Item.Discount			AS Discount_On,
+	COUNT_BIG (*)			AS Total_Count
+FROM Orders.Stock as Stock
+JOIN Orders.OrderItems AS Item
+	ON Stock.StockID = Item.StockID
+GROUP BY Stock.StockID, Stock.StockName, StockPrice, Stock.StockSKU, Stock.StockSize, Item.Quantity, Item.Discount
+
+GO
+
+-- The first index on a View has to be clustered, then followed by the required Unclustered Indexes
+DROP INDEX IF EXISTS UQ_idx_StockItemsStats_Stock_ID ON Orders.Stock_Items_Stats
+CREATE UNIQUE CLUSTERED INDEX UQ_idx_StockItemsStats_Stock_ID ON Orders.Stock_Items_Stats (Stock_ID)
+
+
+
+SELECT * FROM Orders.Stock_Items_Stats
+    -- OPTION (EXPAND VIEWS); -- Ignore the index and expand the view into querie on the underlying tables.
+GO
