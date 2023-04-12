@@ -131,6 +131,7 @@ SELECT [RegisterID]
 
 GO
  -- CREATING CTE (COMMON TABLE EXPRESSION)
+ -- CTE precede the defintion of the operation the statement performs.
 
  -- Syntax Illustration
 WITH StoreLocation
@@ -153,10 +154,10 @@ SELECT * FROM StoreLocation2
 GO
 
 -- multiple CTE examples (CTE can reference each other as long as the is no forward referencing)
+-- SQL Server analyse the query as a whole and then produce a query plan
 
 -- INDEPENDENT CTE
-
-WITH FranchisesSales
+WITH FranchisesSales -- result set 1  // NOTE: the WITH keyword appears only once
 AS
 	(SELECT 
 		Store.Zipcode,
@@ -165,9 +166,9 @@ AS
 		Receipt.[Amount]
 	FROM base.Stores AS Store
 	INNER JOIN base.UnifiedReceipts AS Receipt
-	ON Store.StoresID=Receipt.StoresID),
+	ON Store.StoresID=Receipt.StoresID),		-- expression seperated by commas
 
-FranchisesLocations ([Owner], City, State)
+FranchisesLocations ([Owner], City, [State])	-- result set 2, with names results set that can be reffered to subsequently in the expression
 AS	
 	(SELECT 
 		[Name], 
@@ -175,9 +176,101 @@ AS
 		[State] 
 	FROM base.Franchisees)
 
-SELECT * FROM FranchisesLocations, FranchisesSales;
+SELECT * FROM FranchisesLocations, FranchisesSales;		-- each result set here is considered as Temporary View, use the SELECT statement to refer to it/them.
+
+GO
+
+
+-- TWO CTE: On referencing to other
+	-- You can reference only the CTEs before the current one and not the CTEs that follow.
+
+WITH SalesPerStores --(StoreID, FranchiseeID, [Sum Store Sales])
+AS
+	(SELECT 
+		Store.StoresID,
+		Store.Franchisee,
+		SUM(Receipt.Amount) AS [Sum Store Sales]
+	FROM base.Stores AS Store 
+	INNER JOIN base.UnifiedReceipts AS Receipt
+	ON Store.StoresID=Receipt.StoresID
+	GROUP BY Store.StoresID, Store.Franchisee),
+
+SalesAmountAVG --([Sales Average])
+AS 
+	(SELECT 
+		AVG([Sum Store Sales]) AS [Sales Average] -- you can refer to a column from the previous result set, directly.
+	FROM SalesPerStores)
+
+
+SELECT * FROM SalesPerStores, SalesAmountAVG
+
+GO
+
+-- TWO CTE: On referencing to other
+WITH ReceiptAmount 
+AS
+	(SELECT 
+		RegisterID, 
+		StoresID, 
+		Amount 
+	FROM base.UnifiedReceipts),
+
+AnnualAmount (RegisterID, StoresID, Amount, [YrinBiz x Amount], [FranchiseID]) -- these columns are transfered to the columns copied from refered tables (inherited)
+AS
+	(SELECT
+		RA.RegisterID,
+		RA.StoresID,
+		RA.Amount,
+		(RA.Amount * BS.YearsInBusiness) AS [YrinBiz x Amount],
+		BS.Franchisee
+	FROM ReceiptAmount AS RA
+	--CROSS JOIN base.Stores AS BS -- CROSS JOIN doesn't work on boolean expression like expected with 'ON' with an INNER JOIN Statement
+	INNER JOIN base.Stores AS BS
+	ON RA.StoresID=BS.StoresID
+	)
+
+SELECT		-- SELECT column From the previous CTE because it inherite the prvious column by hierachy
+	F.[Name],
+	AN.FranchiseID,
+	AN.RegisterID,
+	AN.StoresID,
+	AN.Amount,
+	[YrinBiz x Amount]
+FROM AnnualAmount AS AN
+INNER JOIN base.Franchisees AS F
+ON AN.FranchiseID=F.FranchiseesID
 
 GO
 
 
 
+SELECT 
+	StoreID,
+	[Sales
+	([Sum Store Sales]*12) AS [Annual Sales]
+FROM SalesPerStore
+	INNER JOIN SalesAmountAVG as saa
+ON	
+
+
+		
+
+SELECT * FROM SalesPerStores, SalesAmountAVG, Unified;
+GO
+
+--Unified (StoreID, Franchisee, [Sum Store Sales], [Sales Average], [Name], City)
+--AS
+/*	--(
+sps.StoreID,
+		sps.Franchisee,
+		sps.[Sum Store Sales],
+		saa.[Sales Average],
+		fran.[Name],
+		fran.City
+	FROM SalesPerStore AS sps
+	INNER JOIN SalesAmountAVG AS saa
+	ON
+	INNER JOIN base.Franchisees as fran
+	ON saa.franchisee=franchiseesID
+	GROUP BY saa.StoreID, saa.Franchisee, saa.[Sum Store Sales], saa.[Sales Average], fran.[Name],	fran.City)
+*/	
