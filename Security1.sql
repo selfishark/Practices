@@ -53,7 +53,7 @@ setuser '[new user]' -- this command activate the impersonnation
 
 
 select user [luket]	-- IMPERSONATE A DIFFERENT USER PROFILE THAT THE ONE IN CURRENT USE
-setuser		-- takes you back to the initial user
+revert		-- takes you back to the initial user
 
 
 --GROUPS AND ROLES
