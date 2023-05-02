@@ -63,7 +63,7 @@ where s.name='dangers'
 
 sp_help '[dbo].[CAR_Automation]'
 
-
+SET STATISTICS IO ON
 
 
 -- GROUP AND ROLE MANAGEMENT --
