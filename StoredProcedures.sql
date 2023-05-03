@@ -542,6 +542,9 @@ BEGIN
 
 END;
 
+
+-- execution
+
 DECLARE @RetVal INT;
 
 EXEC	@RetVal = dbo.InsertContactRole 

@@ -42,15 +42,34 @@ CREATE  PROCEDURE dbo.InsertContactNotes
 )
 AS
 BEGIN;
-	INSERT INTO dbo.ContactNotes (ContactId, Notes)	-- subtask1_Insert data into the "dbo.ContactNotes" table
-	SELECT	@ContactID, Note 
-	FROM @Notes;
+	
+	BEGIN TRY;
+	
+	BEGIN TRANSACTION;
+		INSERT INTO dbo.ContactNotes (ContactId, Notes)	-- subtask1_Insert data into the "dbo.ContactNotes" table
+		SELECT	@ContactID, Note 
+		FROM @Notes;
+	COMMIT TRANSACTION;
 
 	SELECT * 
 	FROM dbo.ContactNotes	-- subtask2_Retrieve data from the "dbo.ContactNotes" table for the specified ContactID
 	WHERE ContactId = @ContactID
 	ORDER BY NoteId DESC;
 	
+	END TRY
+
+	BEGIN CATCH;
+	
+		IF (@@TRANCOUNT > 0)
+			BEGIN
+				ROLLBACK TRANSACTION;
+			END;
+		PRINT 'Error occured in ' + ERROR_PROCEDURE() + '' + ERROR_MESSAGE();
+		RETURN -1;
+	
+	END CATCH;
+	RETURN 0;
+
 END;
 
 GO
@@ -61,12 +80,12 @@ DECLARE @TempNotes	dbo.ContactNote;
 INSERT INTO @TempNotes 
 	(Note)
 VALUES
-('Finalizing budget for Q2 and allocating resources'),
+--('Finalizing budget for Q2 and allocating resources'),
 --('Reviewing progress on current project and identifying areas for improvement'),
-('Brainstorming new marketing strategies and tactics');
+('This will print out “The value of myVariable is: 10” in the Messages tab of SQL Server Management Studio.');
 
 EXECUTE dbo.InsertContactNotes
-	@ContactID = 15,
+	@ContactID = 22,
 	@Notes = @TempNotes;
 
 
@@ -119,6 +138,7 @@ VALUES
 ('Planning company retreat and activities', 1);
 
 EXECUTE dbo.InsertContactNotesCplx @Notes =	@TempNotes;
+
 
 
 
