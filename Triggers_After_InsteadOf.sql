@@ -236,7 +236,7 @@ GO
 
 /* AFTER INSERT TRIGGERS */
 -- AFTER INSERT TRIGGER FOR LOG EVENT
-
+	-- this trigger use an UPSERT like behavior which means when you want to perform an INSERT operation, but if a matching record already exists, you want to UPDATE it instead.
 CREATE OR ALTER TRIGGER TI_Contacts_ContactVerificationDetails_After
 	ON dbo.ContactPhoneNumbers AFTER INSERT
 	AS 
@@ -296,7 +296,7 @@ CREATE OR ALTER TRIGGER TD_Contacts_ContactVerificationDetails_After
 		-- Log the deletion event in the Audit table
 		BEGIN
 			INSERT INTO dbo.ContactAudit (AuditData)
-			VALUES('New contact with Id = ' + CAST(@Id AS nvarchar(5)) + ' was deleted at ' + CAST (GETDATE() AS nvarchar(20)))
+			VALUES('A contact with Id = ' + CAST(@Id AS nvarchar(5)) + ' was deleted at ' + CAST (GETDATE() AS nvarchar(20)))
 		END
 	END
 GO
