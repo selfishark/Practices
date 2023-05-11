@@ -604,7 +604,45 @@ BEGIN
 END;
 GO
 
+-- Instead Of Delete Trigger to modify underlying tables of a View.
+CREATE OR ALTER TRIGGER TD_Contacts_VW_ContactRoles_InsteadOf
+    ON dbo.VW_ContactRoles
+    INSTEAD OF DELETE
+AS
+BEGIN
+    IF (ROWCOUNT_BIG() = 0)
+        RETURN;
 
+    SET NOCOUNT ON;
+
+    IF NOT EXISTS (SELECT 1 FROM deleted)
+        RETURN;
+
+    BEGIN
+        -- Delete the corresponding records from the ContactRoles table
+        DELETE cr
+        FROM dbo.ContactRoles cr
+        INNER JOIN deleted d ON cr.ContactId = d.ContactId;
+
+        -- Delete the corresponding records from the Contacts table
+        DELETE c
+        FROM dbo.Contacts c
+        WHERE c.ContactId IN (SELECT ContactId FROM deleted);
+    END;
+END;
+GO
+
+DELETE FROM dbo.VW_ContactRoles WHERE ContactId=27;
+GO
+
+/* TRIGGERS ORDERS, APPLY TO AFTER TRIGGERS */
+	-- If trigger recreated, order should be re-assigned 
+ -- use the function SP_SETTRIGGERORDER, add the trigger name, its order and type(INSERT, UPDATE and DELETE)
+sp_settriggerorder @triggername = '[dbo].[TI_VerifiedContacts]', @order = 'first', @stmttype = 'INSERT';
+GO
+
+sp_settriggerorder @triggername = '[Application].[TU_People_ChangeSalesPerson]', @order = 'last', @stmttype = 'UPDATE';
+GO
 
 
 
