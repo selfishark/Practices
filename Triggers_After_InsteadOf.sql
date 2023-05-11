@@ -545,6 +545,65 @@ GO
 
 
 -----
+-- Instead Of Update Trigger to modify underlying tables of a View.
+CREATE OR ALTER TRIGGER TU_Contacts_VW_ContactRoles_InsteadOf
+    ON dbo.VW_ContactRoles
+    INSTEAD OF UPDATE
+AS
+BEGIN
+    IF (ROWCOUNT_BIG() = 0)
+        RETURN;
+
+    SET NOCOUNT ON;
+
+    IF NOT EXISTS (SELECT 1 FROM deleted)
+        RETURN;
+
+    -- Check if any of the relevant columns have changed
+    IF EXISTS
+    (
+        SELECT 1
+        FROM inserted i
+        INNER JOIN deleted d ON i.ContactId = d.ContactId
+        WHERE i.FirstName <> d.FirstName OR
+              i.LastName <> d.LastName OR
+              i.DateOfBirth <> d.DateOfBirth OR
+              i.RoleTitle <> d.RoleTitle
+    )
+    BEGIN
+        -- Check if the role title exists in the Roles table
+        IF EXISTS
+        (
+            SELECT 1
+            FROM inserted i
+            LEFT JOIN dbo.Roles r ON i.RoleTitle = r.RoleTitle
+            WHERE r.RoleId IS NULL
+        )
+        BEGIN
+            RAISERROR('Invalid role title. ', 16, 1);
+            RETURN;
+        END;
+
+        BEGIN
+            -- Update the existing records in the Contacts table
+            UPDATE c
+            SET c.FirstName = i.FirstName,
+                c.LastName = i.LastName,
+                c.DateOfBirth = i.DateOfBirth
+            FROM dbo.Contacts c
+            INNER JOIN inserted i ON c.ContactId = i.ContactId;
+
+            -- Update the RoleId in the ContactRoles table
+            UPDATE cr
+            SET cr.RoleId = r.RoleId
+            FROM dbo.ContactRoles cr
+            INNER JOIN inserted i ON cr.ContactId = i.ContactId
+            INNER JOIN dbo.Roles r ON i.RoleTitle = r.RoleTitle;
+        END;
+    END;
+END;
+GO
+
 
 
 
