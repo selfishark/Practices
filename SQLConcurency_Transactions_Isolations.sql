@@ -314,13 +314,23 @@ ADD TARGET package0.asynchronous_file_target
     (SET filename = N'c:\temp\Deadlocks\Deadlocks.xel');	-- specific location folder
 GO
 
+CREATE EVENT SESSION [Deadlocks2] ON SERVER		-- Create the Event Session [Deadlocks]
+
+ADD EVENT sqlserver.xml_deadlock_report			-- add event of interest
+
+ADD TARGET package0.asynchronous_file_target
+    (SET filename = N'c:\temp\Deadlocks\xml_deadlock_report_2.xslt');	-- specific location folder
+GO
+
 -- Start the new session
-ALTER EVENT SESSION [Deadlocks] ON SERVER STATE = START;	-- Start the deadloack
+ALTER EVENT SESSION [Deadlocks2] ON SERVER STATE = START;	-- Start the deadloack
 
 
 SELECT *
 FROM sys.fn_xe_file_target_read_file('C:\temp\Deadlocks\Deadlocks.xel', NULL, NULL, NULL); -- to read the report file from disk
 
+SELECT *
+FROM sys.fn_xe_file_target_read_file('C:\temp\Deadlocks\xml_deadlock_report_2.xslt', NULL, NULL, NULL); 
 
 --- example of Deadlock Priority setting
 SET LOCK_TIMEOUT -1;
