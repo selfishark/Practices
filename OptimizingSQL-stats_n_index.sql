@@ -55,7 +55,7 @@ ORDER BY 4 desc
 -- 3 -- Analyse impact of the created index in the Query Store
 /* Query Store is not enabled by default for SQL Server 2016, 2017, 2019 (15.x). It is enabled by default in the READ_WRITE mode for new databases starting with SQL Server 2022 (16.x).
 
-		ALTER DATABASE Pluralsight		
+		ALTER DATABASE [AdventureWorksLT2022]		
 		SET QUERY_STORE = ON (OPERATION_MODE = READ_WRITE);
 
 */
@@ -245,4 +245,238 @@ SELECT
 FROM sys.query_store_plan q 
 	INNER JOIN sys.query_store_query_text qt
 	ON qt.query_text_id = q.plan_id -- q.query_text_id	-- to be verified
-WHERE query_plan LIKE '%[PK_Orders_OrderYear_OrderID]%' OR query_plan LIKE '%[PK_Orders2018_OrderYear_OrderID]%' -- EXAMPLE	
+WHERE query_plan LIKE '%[PK_Orders_OrderYear_OrderID]%' OR query_plan LIKE '%[PK_Orders2018_OrderYear_OrderID]%' -- EXAMPLE
+
+
+
+
+
+/* -- MAINTAINING ROWSTORE INDEXES -- */
+
+	-- 1 -- Identify which index is fragmented enough to need maintenance
+		 -- in LIMITED MODE the leaf level of the page is not read so the [AVG_PAGE_SPACE_USED_IN_PERCENT] can't be computed
+		 -- for the evaluation the bigger, the concern: So check the %OF FRAGMENTATION, then THE PAGE COUNT, then in detailled mode check THE SIZE OF THE PAGE
+SELECT OBJECT_SCHEMA_NAME(i.object_id) AS SchemaName, OBJECT_NAME(i.object_id) TableName, 
+	i.name,
+	ips.partition_number, 
+	ips.index_type_desc, 
+	ips.index_level,					-- 0 for Leaves, 1 for Intermediate, 2  for Root (the highest the lower the page count)
+	ips.avg_fragmentation_in_percent,	-- page fragmentation
+	ips.page_count,						-- from 1000 + (it becomes a concern for the rebuild)
+	ips.avg_page_space_used_in_percent	-- percentage of page full
+	FROM sys.indexes i 
+		INNER JOIN sys.dm_db_index_physical_stats(DB_ID(), NULL, NULL, NULL, 'detailed') ips --  limited or detailed / sampled  
+			ON ips.object_id = i.object_id AND ips.index_id = i.index_id
+	--WHERE ips.avg_fragmentation_in_percent >30 AND ips.page_count > 1000	--[FILTER]
+	--WHERE ips.object_id = i.object_id AND ips.index_id = i.index_id
+	--WHERE i.name = 'idx_ShipmentDetails_ShipmentID';
+
+-- OR 
+
+SELECT OBJECT_SCHEMA_NAME(ips.object_id) AS schema_name,
+       OBJECT_NAME(ips.object_id) AS object_name,
+       i.name AS index_name,
+       i.type_desc AS index_type,
+       ips.avg_fragmentation_in_percent,
+       ips.avg_page_space_used_in_percent,
+       ips.page_count,
+       ips.alloc_unit_type_desc
+FROM sys.dm_db_index_physical_stats(DB_ID(), default, default, default, 'SAMPLED') AS ips
+INNER JOIN sys.indexes AS i 
+ON ips.object_id = i.object_id
+   AND
+   ips.index_id = i.index_id
+ORDER BY page_count DESC;
+
+
+	-- 2 Syntax for Index Rebuilds
+
+-- Syntax for SQL Server and Azure SQL Database
+
+
+ALTER INDEX PK_Product_ProductID ON [AdventureWorksLT2022].[SalesLT].[Product]	-- can use option ALL to rebuild all indexes associated with the table or view regardless of the index type
+REBUILD
+WITH
+(
+	PAD_INDEX = OFF						-- PAD_INDEX is ON, free space is allocated on intermediate-level index pages based on the specified or default fill factor value. When PAD_INDEX is OFF or fill factor is not specified, the pages are filled to near capacity, leaving space for at least one maximum-sized row based on the index's keys.
+	FILLFACTOR = fillfactor				-- (creates the page split) The intermediate-level pages are filled to near capacity from 0 to 100 / The default is 0. the desired level of fullness for index pages during their creation or alteration. The specified fill factor applies only during the initial operation and is not dynamically maintained afterward.
+	SORT_IN_TEMPDB = OFF				-- Determines where intermediate sort results are stored during index building. Here's a summary; ON: Intermediate sort results are stored in tempdb. This can improve index creation time if tempdb is on separate disks, but increases disk space usage; OFF: Intermediate sort results are stored in the same database as the index.
+	ONLINE = OFF						-- { ON [ ( <low_priority_lock_wait> ) ] | OFF } -- Specifies whether underlying tables and associated indexes are available for queries and data modification during the index operation. The default is OFF.
+	RESUMABLE = ON						-- Specifies whether an online index operation is resumable. ON Index operation is resumable; OFF Index operation isn't resumable.
+	MAX_DURATION = 60					-- <time> [MINUTES} -- used with RESUMABLE = ON (requires ONLINE = ON)
+	MAXDOP = max_degree_of_parallelism	-- Use MAXDOP to limit the number of processors used in a parallel plan execution. The maximum is 64 processors.
+);
+
+
+ALTER INDEX PK_Product_ProductID ON [AdventureWorksLT2022].[SalesLT].[Product]
+REBUILD
+WITH 
+(
+    FILLFACTOR = 90,
+    SORT_IN_TEMPDB = OFF,
+    ONLINE = OFF,
+    RESUMABLE = ON,
+    MAX_DURATION = 60,
+    MAXDOP = 8
+);
+
+
+	-- 2' Syntax for Index Reorganise
+ALTER INDEX PK_Product_ProductID ON [AdventureWorksLT2022].[SalesLT].[Product]	-- option ALL to regorganise all indexes associated with the table or view regardless
+   REORGANIZE
+   WITH
+   (
+	LOB_COMPACTION = ON		-- only applies to indexes that contain LOB data types (VARCHARMAX, NVARCHARMAX, VARBINARYMAX or XML). it determines is those large datatype are stored out of rows are compacted or not. Can help reduce space usage
+   );
+
+
+/*  (SAMPLE_QUERY) RESTORE A DATABASE FROM DISK
+USE [MASTER]
+
+ALTER DATABASE [basics] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+GO
+
+RESTORE DATABASE [basics] FROM DISK = N'D:\Local\MSSQL\Backup\basics.bak' WITH REPLACE, NOUNLOAD, STATS = 5
+
+GO
+*/
+
+
+	-- 3 for optimal maintenance use: The SQL Server Maintenance Solution
+			-- by Ola Hallengren
+
+/*
+
+Download MaintenanceSolution.sql. This script creates all the objects and jobs that you need.
+
+You can also download the objects as separate scripts:
+
+DatabaseBackup: SQL Server Backup
+DatabaseIntegrityCheck: SQL Server Integrity Check
+IndexOptimize: SQL Server Index and Statistics Maintenance
+CommandExecute: Stored procedure to execute and log commands
+CommandLog: Table to log commands
+Note that you always need CommandExecute; DatabaseBackup, DatabaseIntegrityCheck, and IndexOptimize are using it. You need CommandLog if you are going to use the option to log commands to a table.
+
+Supported versions: SQL Server 2008, SQL Server 2008 R2, SQL Server 2012, SQL Server 2014, SQL Server 2016, SQL Server 2017, SQL Server 2019, SQL Server 2022, Azure SQL Database, and Azure SQL Managed Instance
+
+Documentation
+Backup: https://ola.hallengren.com/sql-server-backup.html
+Integrity Check: https://ola.hallengren.com/sql-server-integrity-check.html
+Index and Statistics Maintenance: https://ola.hallengren.com/sql-server-index-and-statistics-maintenance.html
+
+*/
+
+
+
+
+
+
+/* -- MAINTAINING COLUMNSTORE INDEXES -- */
+
+	-- 1 -- Identify which columnstore index is fragmented enough to need maintenance
+SELECT OBJECT_SCHEMA_NAME(i.object_id) AS schema_name,
+       OBJECT_NAME(i.object_id) AS object_name,
+       i.name AS index_name,
+       i.type_desc AS index_type,
+       100.0 * (ISNULL(SUM(rgs.deleted_rows), 0)) / NULLIF(SUM(rgs.total_rows), 0) AS avg_fragmentation_in_percent
+FROM sys.indexes AS i
+INNER JOIN sys.dm_db_column_store_row_group_physical_stats AS rgs
+ON i.object_id = rgs.object_id
+   AND
+   i.index_id = rgs.index_id
+WHERE rgs.state_desc = 'COMPRESSED'
+GROUP BY i.object_id, i.index_id, i.name, i.type_desc
+ORDER BY schema_name, object_name, index_name, index_type;
+
+
+
+		 -- Identifying Columnstore with deleted rows
+SELECT OBJECT_SCHEMA_NAME(rg.object_id) AS SchemaName,
+       OBJECT_NAME(rg.object_id) AS TableName,
+       i.name AS IndexName,
+       i.type_desc AS IndexType,
+       rg.partition_number,
+       rg.state_description,
+       COUNT(*) AS NumberOfRowgroups,
+       SUM(rg.total_rows) AS TotalRows,
+       SUM(rg.size_in_bytes) AS TotalSizeInBytes,
+       SUM(rg.deleted_rows) AS TotalDeletedRows
+FROM sys.column_store_row_groups AS rg INNER JOIN sys.indexes AS i ON i.object_id = rg.object_id AND i.index_id = rg.index_id
+GROUP BY rg.object_id,
+         i.name,
+         i.type_desc,
+         rg.partition_number,
+         rg.state_description
+ORDER BY TableName,
+         IndexName,
+         rg.partition_number;
+
+
+		-- Indentify columnstore with open rowgroup (The DELTASTORE)
+SELECT OBJECT_SCHEMA_NAME(rg.object_id) AS SchemaName,
+       OBJECT_NAME(rg.object_id) AS TableName,
+       i.name AS IndexName,
+       i.type_desc AS IndexType,
+       rg.partition_number,
+       rg.row_group_id,
+       rg.total_rows,
+       rg.size_in_bytes,
+       rg.deleted_rows,
+       rg.[state],
+       rg.state_description
+FROM sys.column_store_row_groups AS rg
+    INNER JOIN sys.indexes AS i ON i.object_id = rg.object_id AND i.index_id = rg.index_id
+WHERE state_description != 'TOMBSTONE' --	TOMBSTONE(Left-over comlumnstore after Tuple-mover has compressesed closed group)
+ORDER BY TableName,
+         IndexName,
+         rg.partition_number,
+         rg.row_group_id;
+
+
+	-- 2 -- REORGANISE COLUMNSTORE INDEX
+ALTER INDEX PK_Product_ProductID ON [AdventureWorksLT2022].[SalesLT].[Product]
+    REORGANIZE 
+	WITH 
+	(
+		COMPRESS_ALL_ROW_GROUPS = ON	-- This command will force all closed and open row groups into columnstore.
+	);
+
+
+/* -- MAINTAINING STATISTICS -- */
+
+	-- 1 -- Examine what information statistics contain
+DBCC SHOW_STATISTICS('[SalesLT].[Product]', 'PK_Product_ProductID')		-- take a table name and an index as  input and returns tree output stats related to that index
+/*
+	First output: the overall stats for the column that the statistic is built from (i.e: last update date, total row number
+	Second output: the list of densities (the measure of uniqueness) of the left-based subsets of the columns involved in the stats (density= 1/number of unique value)
+	Third output: the histogram (RANGE_HI_KEY: the value present in the indexed column; RANGE_ROWS: the pace between the value present a row and the one before it, EQ_ROWS: the number of rows matching that value exactly; DISTINCT_RANGE_ROWS: the number of unique value between the HI_KEY value and the value before it; AVG_RANGE_ROWS is for that range how many row will match HI_KEY value
+
+*/		
+
+DBCC SHOW_STATISTICS('[Orders].[Orders2018]', '[PK_Orders2018_OrderYear_OrderID]')	
+
+
+		 -- Query Sensitive Bad Statistics
+DBCC SHOW_STATISTICS
+SET STATISTICS IO, TIME ON
+GO
+
+DBCC FREEPROCCACHE
+GO
+
+SELECT * FROM [SalesLT].[vProductModelCatalogDescription]
+WHERE [ModifiedDate] > '2005'
+
+
+
+		-- Turn Statistcs Update OFF/ON
+ALTER DATABASE InterstellarTransport SET AUTO_UPDATE_STATISTICS OFF
+GO
+
+	-- 2 -- MANUAL STATISTICS UPDATE
+UPDATE STATISTICS [SalesLT].[Product] PK_Product_ProductID -- or Not specifying an index will update for all indexes associated to that table
+WITH
+FULLSCAN, -- or SAMPLE or RESAMPLE // SAMPLE 10 or 100 PERCENT or SAMPLE 1000 ROWS if rows concerned, // or WITH FULLSCAN, COLUMNS // RESAMPLE means using the last sample update parameters
+NORECOMPUTE, -- Not good because it disables automatic stats updates on the statistics object
+INCREMENTAL = ON	-- or OFF
