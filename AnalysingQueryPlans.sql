@@ -236,7 +236,107 @@ GO
 	-- in this case news stats cannot be saved
 		ALTER DATABASE [SQLAuthority] -- example
 		SET QUERY_STORE = ON (OPERATION_MODE = READ_ONLY);
-
+		
 -- check which Database has the Query Store Actived for tracking
 SELECT name, is_query_store_on FROM sys.databases
+GO
 
+
+-- Use case of parameter sniffing; how to solve it
+	-- how to get optimal performance from a query at all time, with all parameters
+USE WideWorldImporters
+GO
+
+-- create the parameterised procedure to test with
+CREATE OR ALTER PROCEDURE usp_GetAccounts (@AccountPersonID INT)
+AS 
+BEGIN
+	SELECT [CustomerID],[BillToCustomerID],[OrderID],
+			[DeliveryMethodID],[ContactPersonID]
+	FROM  Sales.Invoices
+	WHERE AccountsPersonID = @AccountPersonID
+	ORDER BY AccountsPersonID
+END
+GO
+
+DBCC FREEPROCCACHE		-- it removes all the execution plans from the procedure cache, forcing SQL Server to recompile the SQL statements the next time they are executed. DB Cache (NOT RECOMMENDED IN PRODUCTION ENV.)
+GO
+
+SET STATISTICS IO, TIME ON
+GO
+-- Small Account result
+EXEC usp_GetAccounts 3260
+GO
+-- Huge Account result
+EXEC usp_GetAccounts 1001
+GO
+
+
+DBCC FREEPROCCACHE		-- Clear procedure cache once more (NOT RECOMMENDED IN PRODUCTION ENV.)
+GO
+-- reverse the order to spot the execution plan cached with the paramter with the huge account result
+-- Huge Account result
+EXEC usp_GetAccounts 1001
+GO
+
+-- Small Account result
+EXEC usp_GetAccounts 3260
+GO
+
+-- create the index to solve the parameter sniffing
+CREATE NONCLUSTERED INDEX [IX_Invoices_AccountsPersonID]
+ON [Sales].[Invoices] ([AccountsPersonID])
+GO
+
+CREATE NONCLUSTERED INDEX [IX_Invoices_AccountsPersonID_incl]
+ON [Sales].[Invoices] ([AccountsPersonID])
+INCLUDE ([CustomerID],[BillToCustomerID],
+[OrderID],[DeliveryMethodID],[ContactPersonID])
+GO
+
+
+
+/* -- COMPARE ESTIMATED AND ACTUAL EXECUTION PLAN -- */
+USE WideWorldImporters
+GO
+
+-- Long Query
+SELECT *
+FROM [Sales].[InvoiceLines] il 
+INNER JOIN [Sales].[Invoices] i ON i.InvoiceID = il.InvoiceID
+INNER JOIN [Sales].[OrderLines] ol ON ol.OrderID = i.OrderID
+INNER JOIN [Sales].[Orders] o ON o.OrderID = ol.OrderID
+GO
+
+-- Query with Insert
+CREATE TABLE #Test (ID INT)
+INSERT INTO #Test (ID)
+SELECT OrderID
+FROM [Sales].[Orders]
+GO
+DROP TABLE #Test
+GO
+
+-- Activate Estimated Execution Plan
+	-- ACTIVE ONLY ONE AT A TIME
+	-- NOT COMPATIBLE WITH OTHER EXECUTION MODE
+SET SHOWPLAN_ALL ON
+SET SHOWPLAN_XML ON
+
+SET SHOWPLAN_ALL OFF
+SET SHOWPLAN_XML OFF
+
+-- Analyse Execution Plans:
+-- Long Query (save execution plan 1)
+SELECT *
+FROM [Sales].[InvoiceLines] il 
+INNER JOIN [Sales].[Invoices] i ON i.InvoiceID = il.InvoiceID
+WHERE il.StockItemID > 100
+GO
+
+-- Long Query (save execution plan 2)
+SELECT *
+FROM [Sales].[InvoiceLines] il 
+INNER JOIN [Sales].[Invoices] i ON i.InvoiceID = il.InvoiceID
+WHERE i.ConfirmedReceivedBy  = 'Alinne Matos'
+GO
